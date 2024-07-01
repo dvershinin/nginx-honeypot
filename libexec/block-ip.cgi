@@ -1,5 +1,6 @@
-echo "Status: 410 Gone"
+#!/bin/bash
 echo "Content-type: text/plain"
+echo "Status: 410 Gone"
 echo "Connection: close"
 echo
 
