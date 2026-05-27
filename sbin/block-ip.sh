@@ -9,8 +9,16 @@ if [[ -z ${REMOTE_ADDR} ]]; then
     fi
 fi
 
-# Put space separate list of trusted IP addresses, not to lock yourself out if you like to test the honeypot! : )
-TRUSTED_IPS=("1.2.3.4" "2.3.4.5" "127.0.0.1")
+# Trusted IPs that must never be banned (so you don't lock yourself out while
+# testing). Override the defaults by editing /etc/nginx/honeypot/trusted-ips.conf
+# which simply redefines the TRUSTED_IPS array, e.g.:
+#   TRUSTED_IPS=("127.0.0.1" "::1" "203.0.113.7")
+TRUSTED_IPS=("127.0.0.1" "::1")
+if [[ -f /etc/nginx/honeypot/trusted-ips.conf ]]; then
+    # shellcheck disable=SC1091
+    source /etc/nginx/honeypot/trusted-ips.conf
+fi
+
 for ip in "${TRUSTED_IPS[@]}"; do
     if [[ "$REMOTE_ADDR" == "$ip" ]]; then
         echo "Trusted IP"
@@ -18,12 +26,11 @@ for ip in "${TRUSTED_IPS[@]}"; do
     fi
 done
 
-if [[ "$REMOTE_ADDR" != "${1#*[0-9].[0-9]}" ]]; then
-  /sbin/ipset add honeypot4 "${REMOTE_ADDR}"
-  /sbin/conntrack -D -s "${REMOTE_ADDR}"
-elif [[ "$REMOTE_ADDR" != "${1#*:[0-9a-fA-F]}" ]]; then
-  /sbin/ipset add honeypot6 "${REMOTE_ADDR}"
-  /sbin/conntrack -D -s "${REMOTE_ADDR}"
+# IPv6 addresses contain a colon; everything else is treated as IPv4.
+if [[ "$REMOTE_ADDR" == *:* ]]; then
+    /sbin/ipset add honeypot6 "${REMOTE_ADDR}"
+    /sbin/conntrack -D -s "${REMOTE_ADDR}"
 else
-  echo "Unrecognized IP format '$1'"
+    /sbin/ipset add honeypot4 "${REMOTE_ADDR}"
+    /sbin/conntrack -D -s "${REMOTE_ADDR}"
 fi
