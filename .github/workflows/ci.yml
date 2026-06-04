@@ -37,11 +37,11 @@ jobs:
             backend: iptables
             expected_backend: ipset
             label: el9-firewalld-iptables
-          - image: rockylinux:10
+          - image: rockylinux/rockylinux:10
             backend: nftables
             expected_backend: firewalld
             label: el10-firewalld-nftables
-          - image: rockylinux:10
+          - image: rockylinux/rockylinux:10
             backend: iptables
             expected_backend: ipset
             label: el10-firewalld-iptables
@@ -117,7 +117,7 @@ jobs:
     name: ban-roundtrip / raw-nftables-no-firewalld
     runs-on: ubuntu-latest
     container:
-      image: rockylinux:10
+      image: rockylinux/rockylinux:10
       options: --privileged --cap-add=NET_ADMIN
     steps:
       - uses: actions/checkout@v4
