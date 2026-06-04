@@ -91,25 +91,47 @@ jobs:
       - name: Run block-ip.sh on a test IP
         run: REMOTE_ADDR=192.0.2.42 bash sbin/block-ip.sh
 
-      - name: Assert IP landed on the active backend
-        run: |
-          set -e
-          got=$(firewall-cmd --ipset=honeypot4 --get-entries | tr ' ' '\n')
-          echo "$got"
-          echo "$got" | grep -qx '192.0.2.42'
-          echo "OK: IP landed on backend=${{ matrix.target.backend }}"
-
-      - name: Assert dispatch path was the expected one
+      - name: Assert dispatch path matches expected
         run: |
           set -e
           got=$(cat /run/nginx-honeypot.backend)
           echo "block-ip.sh routed via: $got"
           test "$got" = "${{ matrix.target.expected_backend }}"
 
+      - name: Assert IP landed on the dispatch target
+        # ipset / firewalld / nft all need a different inspection tool: legacy
+        # ipset add writes the kernel ipset, which is NOT visible via
+        # firewall-cmd (firewalld's --get-entries reads its own runtime DB),
+        # and vice versa. Branch on the cached backend hint.
+        run: |
+          set -e
+          backend=$(cat /run/nginx-honeypot.backend)
+          case "$backend" in
+            ipset)
+              ipset list honeypot4 | grep -q '^192\.0\.2\.42$' ;;
+            firewalld)
+              firewall-cmd --ipset=honeypot4 --get-entries | tr ' ' '\n' | grep -qx '192.0.2.42' ;;
+            nft)
+              nft get element ip filter honeypot4 '{ 192.0.2.42 }' ;;
+            *)
+              echo "unexpected backend: $backend"; exit 1 ;;
+          esac
+          echo "OK: 192.0.2.42 landed via $backend"
+
       - name: IPv6 round-trip
         run: |
+          set -e
           REMOTE_ADDR=2001:db8::dead bash sbin/block-ip.sh
-          firewall-cmd --ipset=honeypot6 --get-entries | tr ' ' '\n' | grep -qx '2001:db8::dead'
+          backend=$(cat /run/nginx-honeypot.backend)
+          case "$backend" in
+            ipset)
+              ipset list honeypot6 | grep -q '2001:db8::dead' ;;
+            firewalld)
+              firewall-cmd --ipset=honeypot6 --get-entries | tr ' ' '\n' | grep -qx '2001:db8::dead' ;;
+            nft)
+              nft get element ip6 filter honeypot6 '{ 2001:db8::dead }' ;;
+          esac
+          echo "OK: IPv6 ban landed via $backend"
 
   raw-nft:
     # Backend #3: raw nftables, no firewalld. Verifies block-ip.sh falls
