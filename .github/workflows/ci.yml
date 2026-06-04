@@ -1,0 +1,140 @@
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint shell scripts
+        run: |
+          shellcheck \
+            sbin/block-ip.sh \
+            sbin/setup-firewalld.sh \
+            sbin/init-firewall.sh \
+            libexec/block-ip.cgi
+
+  ban-roundtrip:
+    # Exercise block-ip.sh end-to-end against a real firewalld instance on
+    # every distro/backend combo we ship. A cell FAILs if the IP doesn't
+    # actually land on the active backend OR if the cached backend hint
+    # doesn't match what we expected (catches future "fixes" that always
+    # route through firewall-cmd and silently break the fast EL9 ipset path).
+    name: ban-roundtrip / ${{ matrix.target.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - image: rockylinux:9
+            backend: iptables
+            expected_backend: ipset
+            label: el9-firewalld-iptables
+          - image: rockylinux:10
+            backend: nftables
+            expected_backend: firewalld
+            label: el10-firewalld-nftables
+          - image: rockylinux:10
+            backend: iptables
+            expected_backend: ipset
+            label: el10-firewalld-iptables
+          - image: almalinux:10
+            backend: nftables
+            expected_backend: firewalld
+            label: alma10-firewalld-nftables
+    container:
+      image: ${{ matrix.target.image }}
+      options: --privileged --cap-add=NET_ADMIN
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          dnf -y install \
+            firewalld ipset nftables conntrack-tools iproute \
+            dbus-daemon procps-ng
+
+      - name: Configure firewalld backend
+        run: |
+          if [ ! -f /etc/firewalld/firewalld.conf ]; then
+            mkdir -p /etc/firewalld
+            cp /usr/lib/firewalld/firewalld.conf /etc/firewalld/firewalld.conf
+          fi
+          sed -i 's/^FirewallBackend=.*/FirewallBackend=${{ matrix.target.backend }}/' \
+            /etc/firewalld/firewalld.conf
+          grep '^FirewallBackend=' /etc/firewalld/firewalld.conf
+
+      - name: Start dbus + firewalld (no systemd)
+        run: |
+          mkdir -p /run/dbus
+          dbus-daemon --system --fork
+          firewalld --nofork &
+          for i in $(seq 1 30); do
+            if firewall-cmd --state >/dev/null 2>&1; then
+              echo "firewalld up after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          firewall-cmd --state
+
+      - name: Create honeypot sets via setup-firewalld.sh
+        run: bash sbin/setup-firewalld.sh
+
+      - name: Run block-ip.sh on a test IP
+        run: REMOTE_ADDR=192.0.2.42 bash sbin/block-ip.sh
+
+      - name: Assert IP landed on the active backend
+        run: |
+          set -e
+          got=$(firewall-cmd --ipset=honeypot4 --get-entries | tr ' ' '\n')
+          echo "$got"
+          echo "$got" | grep -qx '192.0.2.42'
+          echo "OK: IP landed on backend=${{ matrix.target.backend }}"
+
+      - name: Assert dispatch path was the expected one
+        run: |
+          set -e
+          got=$(cat /run/nginx-honeypot.backend)
+          echo "block-ip.sh routed via: $got"
+          test "$got" = "${{ matrix.target.expected_backend }}"
+
+      - name: IPv6 round-trip
+        run: |
+          REMOTE_ADDR=2001:db8::dead bash sbin/block-ip.sh
+          firewall-cmd --ipset=honeypot6 --get-entries | tr ' ' '\n' | grep -qx '2001:db8::dead'
+
+  raw-nft:
+    # Backend #3: raw nftables, no firewalld. Verifies block-ip.sh falls
+    # through to the nft dispatch branch.
+    name: ban-roundtrip / raw-nftables-no-firewalld
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:10
+      options: --privileged --cap-add=NET_ADMIN
+    steps:
+      - uses: actions/checkout@v4
+      - run: dnf -y install nftables conntrack-tools
+      - name: Bootstrap raw nft sets
+        run: |
+          nft add table ip filter
+          nft add set ip filter honeypot4 '{ type ipv4_addr; }'
+          nft add table ip6 filter
+          nft add set ip6 filter honeypot6 '{ type ipv6_addr; }'
+      - name: Run block-ip.sh
+        run: |
+          REMOTE_ADDR=192.0.2.99 bash sbin/block-ip.sh
+          REMOTE_ADDR=2001:db8::beef bash sbin/block-ip.sh
+      - name: Assert nft set contains the IPs and backend cache says nft
+        run: |
+          set -e
+          nft get element ip  filter honeypot4 '{ 192.0.2.99 }'
+          nft get element ip6 filter honeypot6 '{ 2001:db8::beef }'
+          test "$(cat /run/nginx-honeypot.backend)" = "nft"

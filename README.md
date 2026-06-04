@@ -70,27 +70,45 @@ to the `honeypot4` / `honeypot6` ipsets, so the kernel drops all further packets
 setup:
 
 ```bash
-# 1. ipsets + DROP rule (firewalld)
-firewall-cmd --permanent --new-ipset=honeypot4 --type=hash:ip --option=maxelem=1000000 --option=family=inet  --option=hashsize=4096
-firewall-cmd --permanent --new-ipset=honeypot6 --type=hash:ip --option=maxelem=1000000 --option=family=inet6 --option=hashsize=4096
-firewall-cmd --permanent --zone=drop --add-source=ipset:honeypot4
-firewall-cmd --permanent --zone=drop --add-source=ipset:honeypot6
-firewall-cmd --reload
+# 1. ipsets + DROP rule, wrapped behind firewalld:
+sudo /usr/libexec/nginx-honeypot/setup-firewalld.sh
+# (raw iptables host with no firewalld? use init-firewall.sh instead.)
 
 # 2. run fcgiwrap as the nginx user (socket: /run/fcgiwrap/fcgiwrap-nginx.sock)
-dnf install fcgiwrap ipset conntrack-tools
-systemctl enable --now fcgiwrap@nginx.socket
+sudo dnf install fcgiwrap ipset conntrack-tools nftables
+sudo systemctl enable --now fcgiwrap@nginx.socket
 ```
+
+`block-ip.sh` auto-detects the active firewall backend (legacy ipset / firewalld /
+raw nftables) and dispatches accordingly, so the same script works on EL7-EL10 and on
+hand-rolled iptables/nftables hosts. See **Which backend does my distro use?** below.
 
 The CGI needs `sudo` rights for the ban script (the RPM ships this as
 `/etc/sudoers.d/nginx-honeypot`):
 
 ```
-Defaults!/usr/local/sbin/block-ip.sh env_keep=REMOTE_ADDR
-nginx ALL=(ALL) NOPASSWD: /usr/local/sbin/block-ip.sh
+Defaults!/usr/libexec/nginx-honeypot/block-ip.sh env_keep=REMOTE_ADDR
+nginx ALL=(ALL) NOPASSWD: /usr/libexec/nginx-honeypot/block-ip.sh
 ```
 
 Edit `/etc/nginx/honeypot/trusted-ips.conf` to whitelist IPs that must never be banned.
+
+#### Which backend does my distro use?
+
+| Distro                                 | firewalld default  | Recommended setup                     | `block-ip.sh` path           |
+|----------------------------------------|--------------------|---------------------------------------|------------------------------|
+| RHEL/CentOS/Rocky/Alma 7-9, Amazon 2/2023 | `iptables`     | `setup-firewalld.sh`                  | legacy ipset (~2 ms)         |
+| RHEL/Rocky/Alma 10                     | `nftables`         | `setup-firewalld.sh`                  | firewall-cmd (~500 ms)       |
+| Fedora 41+                             | `nftables`         | `setup-firewalld.sh`                  | firewall-cmd (~500 ms)       |
+| Hand-rolled iptables (no firewalld)    | n/a                | `init-firewall.sh`                    | legacy ipset (~2 ms)         |
+| Hand-rolled nftables (no firewalld)    | n/a                | `nft add table; nft add set ...`      | nft direct                   |
+
+On EL10 (and any host where firewalld is on the `nftables` backend), the ipsets created
+by `setup-firewalld.sh` live **inside firewalld's own nft table**, not as kernel ipsets -
+so `block-ip.sh` routes through `firewall-cmd` to add entries. That path is correct but
+~250x slower than the legacy ipset call. For high-traffic EL10 hosts, the **Pro
+`nginx-module-nftset-access` path** below bypasses fcgiwrap entirely and is the
+recommended production option.
 
 ### Pro: kernel-level ban with `nftset-access` (recommended)
 

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Script that starts firewall
-# Don't forget to chmod 755 this file.
+# One-shot setup for the no-firewalld case: a raw iptables host that wants the
+# honeypot4/honeypot6 kernel ipsets wired directly into INPUT -j DROP.
+# If you have firewalld, use setup-firewalld.sh instead.
 # Adjust the block time as needed (default 7200 seconds).
 /usr/sbin/ipset create honeypot4 hash:ip timeout 7200
 /usr/sbin/ipset create honeypot6 hash:ip timeout 7200
