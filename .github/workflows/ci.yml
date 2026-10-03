@@ -19,7 +19,20 @@ jobs:
             sbin/block-ip.sh \
             sbin/setup-firewalld.sh \
             sbin/init-firewall.sh \
-            libexec/block-ip.cgi
+            libexec/block-ip.cgi \
+            tests/honey-match.sh
+
+  honey-match:
+    # Load honey.conf into a real nginx and assert which URIs are honey (410)
+    # and which legitimate ones must pass (200), incl. query-string probes.
+    name: honey-match
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux/rockylinux:10
+    steps:
+      - uses: actions/checkout@v4
+      - run: dnf -y install nginx
+      - run: bash tests/honey-match.sh
 
   ban-roundtrip:
     # Exercise block-ip.sh end-to-end against a real firewalld instance on

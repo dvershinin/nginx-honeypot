@@ -13,6 +13,10 @@ You [don't host phpMyAdmin](https://www.getpagespeed.com/server-setup/security/s
 All these requests come from bots, not from you, and allow early detection and very proactive blocking
 in order to reduce server load and logs noise.
 
+Honey also covers query-string exploit probes, matched against the raw `$request_uri`, e.g. the
+WordPress template-hierarchy LFI `/?page_id=1&pagename=templates%252f..%252f…pearcmd` and other
+`pearcmd` / `allow_url_include` / `php://input` attempts. Plain `?pagename=` / `?page_id=` requests are untouched.
+
 Honey is at `honeypot/honey.conf`.
 
 ## Install
