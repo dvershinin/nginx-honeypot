@@ -1,0 +1,15 @@
+[Unit]
+Description=Ship NGINX honeypot events to the central server
+ConditionPathExists=/etc/nginx/honeypot/report.env
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/nginx-honeypot/honeypot-report.sh
+StateDirectory=nginx-honeypot
+StateDirectoryMode=0700
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true

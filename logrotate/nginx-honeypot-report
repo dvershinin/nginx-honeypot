@@ -1,0 +1,14 @@
+/var/log/nginx/honeypot-events.log {
+    daily
+    rotate 7
+    missingok
+    notifempty
+    # The reporter drains the previous file by name before it is compressed
+    delaycompress
+    compress
+    create 0640 nginx adm
+    sharedscripts
+    postrotate
+        [ ! -f /var/run/nginx.pid ] || kill -USR1 "$(cat /var/run/nginx.pid)"
+    endscript
+}

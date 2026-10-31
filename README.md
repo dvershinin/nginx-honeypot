@@ -148,6 +148,30 @@ inside NGINX, IPv4/IPv6 is auto-detected, and `timeout` expires bans automatical
 module needs `CAP_NET_ADMIN` (its `selinux` subpackage grants this automatically) and
 NGINX built `--with-compat` (GetPageSpeed NGINX is).
 
+### Network mode: report trap hits to a central server
+
+`server-ban-nftset-network.conf` is the Pro path plus an event log: each trap hit becomes one
+JSON line in `/var/log/nginx/honeypot-events.log`, and `nginx-honeypot-report.timer` ships new
+lines to the central server every minute. As shipped it only observes. The set has no drop
+rule, so visitors see no change.
+
+```nginx
+# http {}
+include honeypot/log-format-network.conf;
+# server {}
+include honeypot/server-ban-nftset-network.conf;
+```
+
+```bash
+nft add table ip gps_honeypot
+nft add set ip gps_honeypot detected '{ type ipv4_addr; flags timeout; }'
+nft add table ip6 gps_honeypot
+nft add set ip6 gps_honeypot detected '{ type ipv6_addr; flags timeout; }'
+install -m 0600 /dev/null /etc/nginx/honeypot/report.env   # REPORT_URL=https://...
+install -m 0600 /dev/null /etc/nginx/honeypot/report.curl  # header = "Authorization: Bearer <token>"
+systemctl enable --now nginx-honeypot-report.timer
+```
+
 ## Contributions
 
 Contributions are welcome! Please open an issue or submit a pull request with your improvements.

@@ -58,5 +58,17 @@ check 200 '/blog/config-create-guide'
 check 200 '/?s=php+tutorial'
 # Existing path honey still trips
 check 410 '/phpmyadmin/'
+check 410 '/.env'
+check 410 '/.git/config'
+check 410 '/app/.env'
+check 410 '/.well-known'
+check 410 '/.well-known/../.env'
+check 410 '/actuator/env'
+check 410 '/actuator/heapdump'
+# Not honey: RFC 8615 tree, monitor endpoints, dot-paths in the query string
+check 200 '/.well-known/acme-challenge/token'
+check 200 '/.well-known/security.txt'
+check 200 '/actuator/health'
+check 200 '/login?next=/.hidden/page'
 
 exit $fail

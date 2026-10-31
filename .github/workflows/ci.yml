@@ -20,7 +20,9 @@ jobs:
             sbin/setup-firewalld.sh \
             sbin/init-firewall.sh \
             libexec/block-ip.cgi \
-            tests/honey-match.sh
+            tests/honey-match.sh \
+            sbin/honeypot-report.sh \
+            tests/honey-event.sh
 
   honey-match:
     # Load honey.conf into a real nginx and assert which URIs are honey (410)
@@ -31,8 +33,18 @@ jobs:
       image: rockylinux/rockylinux:10
     steps:
       - uses: actions/checkout@v4
-      - run: dnf -y install nginx
+      - run: dnf -y install nginx python3
       - run: bash tests/honey-match.sh
+      - run: bash tests/honey-event.sh
+
+  report:
+    # Reporter batching, offsets, rotation and outage handling against stub curl.
+    name: report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y bats
+      - run: bats tests/honeypot-report.bats
 
   ban-roundtrip:
     # Exercise block-ip.sh end-to-end against a real firewalld instance on
